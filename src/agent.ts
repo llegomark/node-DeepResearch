@@ -1,21 +1,21 @@
-import {z, ZodObject} from 'zod';
-import {generateObject} from 'ai';
-import {getModel, getMaxTokens, SEARCH_PROVIDER, STEP_SLEEP} from "./config";
-import {readUrl, removeAllLineBreaks} from "./tools/read";
-import {handleGenerateObjectError} from './utils/error-handling';
+import { z, ZodObject } from 'zod';
+import { generateObject } from 'ai';
+import { getModel, getMaxTokens, SEARCH_PROVIDER, STEP_SLEEP, LLM_PROVIDER } from "./config";
+import { readUrl } from "./tools/read";
+import { handleGenerateObjectError } from './utils/error-handling';
 import fs from 'fs/promises';
-import {SafeSearchType, search as duckSearch} from "duck-duck-scrape";
-import {braveSearch} from "./tools/brave-search";
-import {rewriteQuery} from "./tools/query-rewriter";
-import {dedupQueries} from "./tools/jina-dedup";
-import {evaluateAnswer, evaluateQuestion} from "./tools/evaluator";
-import {analyzeSteps} from "./tools/error-analyzer";
-import {TokenTracker} from "./utils/token-tracker";
-import {ActionTracker} from "./utils/action-tracker";
-import {StepAction, AnswerAction} from "./types";
-import {TrackerContext} from "./types";
-import {search} from "./tools/jina-search";
-// import {grounding} from "./tools/grounding";
+import { SafeSearchType, search as duckSearch } from "duck-duck-scrape";
+import { braveSearch } from "./tools/brave-search";
+import { rewriteQuery } from "./tools/query-rewriter";
+import { dedupQueries } from "./tools/jina-dedup";
+import { evaluateAnswer, evaluateQuestion } from "./tools/evaluator";
+import { analyzeSteps } from "./tools/error-analyzer";
+import { TokenTracker } from "./utils/token-tracker";
+import { ActionTracker } from "./utils/action-tracker";
+import { StepAction, AnswerAction } from "./types";
+import { TrackerContext } from "./types";
+import { search } from "./tools/jina-search";
+import { grounding } from "./tools/grounding";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 async function sleep(ms: number) {
@@ -69,9 +69,7 @@ function getSchema(allowReflect: boolean, allowRead: boolean, allowAnswer: boole
     .describe("Must match exactly one action type");
 
   return z.object(properties);
-
 }
-
 
 function getPrompt(
   question: string,
@@ -173,7 +171,6 @@ ${learnedStrategy}
   }
 
   // Build actions section
-
   if (allURLs && Object.keys(allURLs).length > 0 && allowRead) {
     const urlList = Object.entries(allURLs)
       .map(([url, desc]) => `  + "${url}": "${desc}"`)
@@ -193,7 +190,6 @@ ${urlList}
   }
 
   if (allowSearch) {
-
     actionSections.push(`
 <action-search>    
 ${allKeywords?.length ? `
@@ -273,16 +269,17 @@ function updateContext(step: any) {
   allContext.push(step)
 }
 
-
+function removeAllLineBreaks(text: string) {
+  return text.replace(/(\r\n|\n|\r)/gm, " ");
+}
 
 function removeHTMLtags(text: string) {
   return text.replace(/<[^>]*>?/gm, '');
 }
 
-
 export async function getResponse(question: string, tokenBudget: number = 1_000_000,
-                                  maxBadAttempts: number = 3,
-                                  existingContext?: Partial<TrackerContext>): Promise<{ result: StepAction; context: TrackerContext }> {
+  maxBadAttempts: number = 3,
+  existingContext?: Partial<TrackerContext>): Promise<{ result: StepAction; context: TrackerContext }> {
   const context: TrackerContext = {
     tokenTracker: existingContext?.tokenTracker || new TokenTracker(tokenBudget),
     actionTracker: existingContext?.actionTracker || new ActionTracker()
@@ -302,7 +299,7 @@ export async function getResponse(question: string, tokenBudget: number = 1_000_
   let allowRead = true;
   let allowReflect = true;
   let prompt = '';
-  let thisStep: StepAction = {action: 'answer', answer: '', references: [], think: ''};
+  let thisStep: StepAction = { action: 'answer', answer: '', references: [], think: '' };
   let isAnswered = false;
 
   const allURLs: Record<string, string> = {};
@@ -365,7 +362,7 @@ export async function getResponse(question: string, tokenBudget: number = 1_000_
     console.log(`${thisStep.action} <- [${actionsStr}]`);
     console.log(thisStep)
 
-    context.actionTracker.trackAction({totalStep, thisStep, gaps, badAttempts});
+    context.actionTracker.trackAction({ totalStep, thisStep, gaps, badAttempts });
     context.tokenTracker.trackUsage('agent', totalTokens);
 
     // reset allowAnswer to true
@@ -388,7 +385,7 @@ export async function getResponse(question: string, tokenBudget: number = 1_000_
         ...thisStep,
       });
 
-      const {response: evaluation} = await evaluateAnswer(currentQuestion, thisStep,
+      const { response: evaluation } = await evaluateAnswer(currentQuestion, thisStep,
         evaluationMetrics[currentQuestion], context.tokenTracker);
 
       if (currentQuestion === question) {
@@ -427,7 +424,7 @@ The evaluator thinks your answer is bad because:
 ${evaluation.think}
 `);
             // store the bad context and reset the diary context
-            const {response: errorAnalysis} = await analyzeSteps(diaryContext);
+            const { response: errorAnalysis } = await analyzeSteps(diaryContext);
 
             allKnowledge.push({
               question: currentQuestion,
@@ -444,9 +441,9 @@ ${evaluation.think}
             });
 
             if (errorAnalysis.questionsToAnswer) {
-                gaps.push(...errorAnalysis.questionsToAnswer.slice(0, 2));
-                allQuestions.push(...errorAnalysis.questionsToAnswer.slice(0, 2));
-                gaps.push(question);  // always keep the original question in the gaps
+              gaps.push(...errorAnalysis.questionsToAnswer.slice(0, 2));
+              allQuestions.push(...errorAnalysis.questionsToAnswer.slice(0, 2));
+              gaps.push(question);  // always keep the original question in the gaps
             }
 
             badAttempts++;
@@ -508,35 +505,42 @@ But then you realized you have asked them before. You decided to to think out of
       }
     } else if (thisStep.action === 'search' && thisStep.searchQuery) {
       // rewrite queries
-      let {queries: keywordsQueries} = await rewriteQuery(thisStep);
+      let { queries: keywordsQueries } = await rewriteQuery(thisStep);
 
       const oldKeywords = keywordsQueries;
-      // avoid exisitng searched queries
-      const {unique_queries: dedupedQueries} = await dedupQueries(keywordsQueries, allKeywords);
+      // avoid existing searched queries
+      const { unique_queries: dedupedQueries } = await dedupQueries(keywordsQueries, allKeywords);
       keywordsQueries = dedupedQueries;
 
       if (keywordsQueries.length > 0) {
-        // let googleGrounded = '';
+        let googleGrounded = '';
         const searchResults = [];
         for (const query of keywordsQueries) {
           console.log(`Search query: ${query}`);
+
+          // Add grounding for each query
+          if (LLM_PROVIDER === 'gemini') {
+            try {
+              googleGrounded = await grounding(query, context.tokenTracker);
+            } catch (error) {
+              console.error('Grounding failed:', error);
+              // Continue with regular search even if grounding fails
+            }
+          }
 
           let results;
 
           switch (SEARCH_PROVIDER) {
             case 'jina':
               // use jinaSearch
-              results = {results: (await search(query, context.tokenTracker)).response?.data || []};
-              // if (LLM_PROVIDER === 'gemini') {
-              //   googleGrounded = await grounding(query, context.tokenTracker);
-              // }
+              results = { results: (await search(query, context.tokenTracker)).response?.data || [] };
               break;
             case 'duck':
-              results = await duckSearch(query, {safeSearch: SafeSearchType.STRICT});
+              results = await duckSearch(query, { safeSearch: SafeSearchType.STRICT });
               break;
             case 'brave':
               try {
-                const {response} = await braveSearch(query);
+                const { response } = await braveSearch(query);
                 results = {
                   results: response.web?.results?.map(r => ({
                     title: r.title,
@@ -546,12 +550,12 @@ But then you realized you have asked them before. You decided to to think out of
                 };
               } catch (error) {
                 console.error('Brave search failed:', error);
-                results = {results: []};
+                results = { results: [] };
               }
               await sleep(STEP_SLEEP)
               break;
             default:
-              results = {results: []};
+              results = { results: [] };
           }
           const minResults = results.results.map(r => ({
             title: r.title,
@@ -562,14 +566,13 @@ But then you realized you have asked them before. You decided to to think out of
           Object.assign(allURLs, Object.fromEntries(
             minResults.map(r => [r.url, r.title])
           ));
-          searchResults.push({query, results: minResults});
+          searchResults.push({ query, results: minResults });
           allKeywords.push(query);
         }
 
         allKnowledge.push({
           question: `What do Internet say about ${thisStep.searchQuery}?`,
-          answer: removeHTMLtags(searchResults.map(r => r.results.map(r => r.description).join('; ')).join('; ')),
-          // answer: googleGrounded + removeHTMLtags(searchResults.map(r => r.results.map(r => r.description).join('; ')).join('; ')),
+          answer: googleGrounded + removeHTMLtags(searchResults.map(r => r.results.map(r => r.description).join('; ')).join('; ')),
           type: 'side-info'
         });
 
@@ -593,7 +596,6 @@ But then you realized you have already searched for these keywords before.
 You decided to think out of the box or cut from a completely different angle.
 `);
 
-
         updateContext({
           totalStep,
           ...thisStep,
@@ -603,7 +605,6 @@ You decided to think out of the box or cut from a completely different angle.
         allowSearch = false;
       }
     } else if (thisStep.action === 'visit' && thisStep.URLTargets?.length) {
-
       let uniqueURLs = thisStep.URLTargets;
       if (visitedURLs.length > 0) {
         // check duplicate urls
@@ -611,11 +612,10 @@ You decided to think out of the box or cut from a completely different angle.
       }
 
       if (uniqueURLs.length > 0) {
-
         const urlResults = await Promise.all(
           uniqueURLs.map(async (url: string) => {
             try {
-              const {response, tokens} = await readUrl(url, context.tokenTracker);
+              const { response, tokens } = await readUrl(url, context.tokenTracker);
               allKnowledge.push({
                 question: `What is in ${response.data?.url || 'the URL'}?`,
                 answer: removeAllLineBreaks(response.data?.content || 'No content available'),
@@ -624,7 +624,7 @@ You decided to think out of the box or cut from a completely different angle.
               });
               visitedURLs.push(url);
               delete allURLs[url];
-              return {url, result: response, tokens};
+              return { url, result: response, tokens };
             } catch (error) {
               console.error('Error reading URL:', error);
             }
@@ -642,7 +642,6 @@ You found some useful information on the web and add them to your knowledge for 
           result: urlResults
         });
       } else {
-
         diaryContext.push(`
 At step ${step}, you took the **visit** action and try to visit the following URLs:
 ${thisStep.URLTargets.join('\n')}
@@ -665,7 +664,7 @@ You decided to think out of the box or cut from a completely different angle.`);
 
   await storeContext(prompt, schema, [allContext, allKeywords, allQuestions, allKnowledge], totalStep);
   if (isAnswered) {
-    return {result: thisStep, context};
+    return { result: thisStep, context };
   } else {
     console.log('Enter Beast mode!!!')
     // any answer is better than no answer, humanity last resort
@@ -706,10 +705,10 @@ You decided to think out of the box or cut from a completely different angle.`);
     }
     await storeContext(prompt, schema, [allContext, allKeywords, allQuestions, allKnowledge], totalStep);
     thisStep = object as StepAction;
-    context.actionTracker.trackAction({totalStep, thisStep, gaps, badAttempts});
+    context.actionTracker.trackAction({ totalStep, thisStep, gaps, badAttempts });
     context.tokenTracker.trackUsage('agent', totalTokens);
     console.log(thisStep)
-    return {result: thisStep, context};
+    return { result: thisStep, context };
   }
 }
 
@@ -732,15 +731,44 @@ ${JSON.stringify(zodToJsonSchema(schema), null, 2)}
   }
 }
 
-
 export async function main() {
   const question = process.argv[2] || "";
   const {
     result: finalStep,
     context: tracker
   } = await getResponse(question) as { result: AnswerAction; context: TrackerContext };
+
   console.log('Final Answer:', finalStep.answer);
 
+  // Save results to a file
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  // Create a formatted string from the results
+  const outputContent = [
+    `Research Results (${timestamp})`,
+    '='.repeat(50),
+    `Question: ${question}`,
+    '',
+    'Answer:',
+    finalStep.answer,
+    '',
+    'References:',
+    ...(finalStep.references?.map(ref =>
+      `- ${ref.url}\n  "${ref.exactQuote}"`) || []),
+    '',
+    'Token Usage:',
+    JSON.stringify(tracker.tokenTracker.getUsageBreakdown(), null, 2),
+    '',
+    `Total Tokens: ${tracker.tokenTracker.getTotalUsage()}`
+  ].join('\n');
+
+  // Write to file
+  await fs.writeFile(
+    `research-results-${timestamp}.txt`,
+    outputContent
+  );
+
+  console.log(`\nResults saved to research-results-${timestamp}.txt`);
   tracker.tokenTracker.printSummary();
 }
 
